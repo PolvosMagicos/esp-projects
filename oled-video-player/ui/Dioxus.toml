@@ -3,7 +3,7 @@
 [web.app]
 
 # HTML title tag content
-title = "ui"
+title = "OLED Video Player"
 
 # include `assets` in web platform
 [web.resource]
