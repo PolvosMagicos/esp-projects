@@ -7,7 +7,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use web_sys::{
     CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, HtmlSelectElement,
-    HtmlVideoElement, ImageData, Url,
+    HtmlVideoElement, ImageData, Url, WebSocket,
 };
 
 const FRAME_SIZE: usize = 1024;
@@ -184,7 +184,7 @@ fn App() -> Element {
                     }
                 }
             }
-            footer { "Frames are sent as raw " code { "[u8; 1024]" } " buffers to " code { "POST /frame" } "." }
+            footer { "Video frames are streamed as raw " code { "[u8; 1024]" } " WebSocket messages to " code { "ws://device/frames" } "." }
         }
     }
 }
@@ -316,6 +316,8 @@ async fn stream_selected_video(ip: String, mut status: Signal<String>) -> Result
         return Err("Select a video first".into());
     }
     let fps = read_number_input("fps-input", 10).clamp(1, 30);
+    status.set("Connecting WebSocket…".into());
+    let socket = open_frame_socket(&ip).await?;
     video.set_current_time(0.0);
     JsFuture::from(
         video
@@ -326,12 +328,38 @@ async fn stream_selected_video(ip: String, mut status: Signal<String>) -> Result
     .map_err(|err| format!("Video play promise rejected: {err:?}"))?;
     let delay_ms = 1000 / fps;
     while !video.ended() {
+        if socket.ready_state() != WebSocket::OPEN {
+            return Err("WebSocket connection closed".into());
+        }
         let frame = render_video_frame(&document, &video, &canvas)?;
-        post_frame(&ip, &frame).await?;
+        socket
+            .send_with_u8_array(&frame)
+            .map_err(|err| format!("WebSocket send failed: {err:?}"))?;
         status.set(format!("Streaming... {:.1}s", video.current_time()));
         TimeoutFuture::new(delay_ms).await;
     }
+    socket
+        .close()
+        .map_err(|err| format!("Could not close WebSocket: {err:?}"))?;
     Ok(())
+}
+
+async fn open_frame_socket(ip: &str) -> Result<WebSocket, String> {
+    let socket = WebSocket::new(&format!("ws://{ip}/frames"))
+        .map_err(|err| format!("Could not open WebSocket: {err:?}"))?;
+
+    for _ in 0..500 {
+        match socket.ready_state() {
+            WebSocket::OPEN => return Ok(socket),
+            WebSocket::CLOSING | WebSocket::CLOSED => {
+                return Err("WebSocket connection failed".into());
+            }
+            _ => TimeoutFuture::new(10).await,
+        }
+    }
+
+    let _ = socket.close();
+    Err("WebSocket connection timed out".into())
 }
 
 fn load_selected_video() -> Result<String, String> {

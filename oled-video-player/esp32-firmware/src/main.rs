@@ -10,6 +10,7 @@ use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use embedded_svc::{
     http::{Headers, Method},
     io::Write,
+    ws::FrameType,
 };
 
 use esp_idf_svc::{
@@ -150,7 +151,37 @@ fn main() -> Result<()> {
         Ok(())
     })?;
 
-    info!("HTTP server started");
+    let display_for_stream = display.clone();
+
+    server.ws_handler("/frames", None, move |ws| {
+        if ws.is_new() {
+            info!("WebSocket frame stream connected");
+            return Ok::<(), anyhow::Error>(());
+        }
+        if ws.is_closed() {
+            info!("WebSocket frame stream disconnected");
+            return Ok(());
+        }
+
+        let (frame_type, len) = ws.recv(&mut [])?;
+        if frame_type != FrameType::Binary(false) || len != FRAME_SIZE {
+            ws.send(FrameType::Close, &[])?;
+            anyhow::bail!("Expected one unfragmented {}-byte binary frame", FRAME_SIZE);
+        }
+
+        let mut frame = [0u8; FRAME_SIZE];
+        ws.recv(&mut frame)?;
+
+        let mut display = display_for_stream.lock().unwrap();
+        draw_raw_frame(&mut *display, &frame)?;
+        display
+            .flush()
+            .map_err(|err| anyhow::anyhow!("OLED flush failed: {err:?}"))?;
+
+        Ok(())
+    })?;
+
+    info!("HTTP and WebSocket server started");
 
     loop {
         FreeRtos::delay_ms(1000);
