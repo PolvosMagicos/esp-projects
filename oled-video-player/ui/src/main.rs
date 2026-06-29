@@ -117,8 +117,8 @@ fn App() -> Element {
                                     }
                                 }
                             }
-                            RangeControl { id: "fps-input", label: "Target FPS", min: "1", max: "20", value: "10", suffix: " fps" }
-                            RangeControl { id: "zoom-input", label: "Content zoom", min: "100", max: "400", value: "200", suffix: "%" }
+                            RangeControl { id: "fps-input", label: "Target FPS", min: "1", max: "30", value: "10", suffix: " fps" }
+                            RangeControl { id: "zoom-input", label: "Content zoom", min: "100", max: "400", value: "100", suffix: "%" }
                             RangeControl { id: "pan-x-input", label: "Horizontal pan", min: "-64", max: "64", value: "0", suffix: " px" }
                             RangeControl { id: "pan-y-input", label: "Vertical pan", min: "-32", max: "32", value: "0", suffix: " px" }
                             RangeControl { id: "threshold-input", label: "B/W bias", min: "0", max: "255", value: "128", suffix: "" }
@@ -315,7 +315,7 @@ async fn stream_selected_video(ip: String, mut status: Signal<String>) -> Result
     if video.src().is_empty() {
         return Err("Select a video first".into());
     }
-    let fps = read_number_input("fps-input", 10).clamp(1, 20);
+    let fps = read_number_input("fps-input", 10).clamp(1, 30);
     video.set_current_time(0.0);
     JsFuture::from(
         video
@@ -389,7 +389,7 @@ fn render_video_frame(
     let gamma = read_number_input("gamma-input", 85).clamp(30, 300) as f32 / 100.0;
     let invert = read_checkbox_input("invert-input", false);
     let beam_splitter = read_checkbox_input("beam-splitter-input", false);
-    let zoom = read_number_input("zoom-input", 200).clamp(100, 400) as f64 / 100.0;
+    let zoom = read_number_input("zoom-input", 100).clamp(100, 400) as f64 / 100.0;
     let pan_x = read_signed_number_input("pan-x-input", 0).clamp(-64, 64) as f64;
     let pan_y = read_signed_number_input("pan-y-input", 0).clamp(-32, 32) as f64;
     let transform = FrameTransform { zoom, pan_x, pan_y };
@@ -427,13 +427,13 @@ fn render_video_frame(
             .map_err(|err| format!("Could not read line-art samples: {err:?}"))?
             .data()
             .0;
-        let (mut frame, mut preview_rgba) = if dither == "line-art" {
+        let (mut frame, preview_rgba) = if dither == "line-art" {
             supersampled_line_art(&samples, threshold, contrast, gamma, invert)
         } else {
             supersampled_solid_threshold(&samples, threshold, contrast, gamma, invert)
         };
         if beam_splitter {
-            flip_output_y(&mut frame, &mut preview_rgba);
+            flip_output_y(&mut frame);
         }
         put_preview(&context, &preview_rgba)?;
         return Ok(frame);
@@ -454,7 +454,7 @@ fn render_video_frame(
     let mut rgba = image_data.data().0;
     let mut frame = rgba_to_oled_frame(&mut rgba, threshold, contrast, gamma, invert, &dither);
     if beam_splitter {
-        flip_output_y(&mut frame, &mut rgba);
+        flip_output_y(&mut frame);
     }
     put_preview(&context, &rgba)?;
     Ok(frame)
@@ -684,9 +684,8 @@ fn pack_monochrome_pixels(pixels: &[bool]) -> ([u8; FRAME_SIZE], Vec<u8>) {
     (frame, preview)
 }
 
-fn flip_output_y(frame: &mut [u8; FRAME_SIZE], preview: &mut [u8]) {
+fn flip_output_y(frame: &mut [u8; FRAME_SIZE]) {
     let source_frame = *frame;
-    let source_preview = preview.to_vec();
     frame.fill(0);
 
     for y in 0..HEIGHT {
@@ -698,11 +697,6 @@ fn flip_output_y(frame: &mut [u8; FRAME_SIZE], preview: &mut [u8]) {
             let target_x = x;
             let target_y = HEIGHT - 1 - y;
             set_pixel(frame, target_x, target_y, on);
-
-            let source_rgba = (y * WIDTH + x) * 4;
-            let target_rgba = (target_y * WIDTH + target_x) * 4;
-            preview[target_rgba..target_rgba + 4]
-                .copy_from_slice(&source_preview[source_rgba..source_rgba + 4]);
         }
     }
 }
@@ -855,18 +849,14 @@ mod tests {
     }
 
     #[test]
-    fn beam_splitter_compensation_flips_only_y() {
+    fn beam_splitter_compensation_flips_output_frame_y() {
         let mut frame = [0; FRAME_SIZE];
         set_pixel(&mut frame, 0, 0, true);
-        let mut preview = vec![0; WIDTH * HEIGHT * 4];
-        preview[..4].fill(255);
 
-        flip_output_y(&mut frame, &mut preview);
+        flip_output_y(&mut frame);
 
         assert_eq!(frame[0] & 1, 0);
         let target_index = (HEIGHT / 8 - 1) * WIDTH;
         assert_ne!(frame[target_index] & (1 << 7), 0);
-        let target_rgba = (HEIGHT - 1) * WIDTH * 4;
-        assert_eq!(&preview[target_rgba..target_rgba + 4], &[255; 4]);
     }
 }
