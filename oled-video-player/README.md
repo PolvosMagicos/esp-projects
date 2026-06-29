@@ -7,9 +7,7 @@ persistent WebSocket connection.
 
 ## Showcase
 
-<video src="./demo.mp4" controls muted playsinline width="720">
-  Your Markdown viewer cannot play the embedded video.
-</video>
+https://github.com/user-attachments/assets/a2fac6cd-bec7-4025-9c53-d2be58fe8134
 
 ## How it works
 
